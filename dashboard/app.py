@@ -11,7 +11,7 @@ st.set_page_config(page_title="IPL Analytics Dashboard", layout="wide")
 # -------------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DATA_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'ipl_cleaned.csv')
+DATA_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'ipl_features.csv')
 MODEL_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'ipl_model.pkl')
 ENCODER_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'encoders.pkl')
 
