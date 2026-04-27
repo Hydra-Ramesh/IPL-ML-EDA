@@ -7,7 +7,7 @@ import os
 st.set_page_config(page_title="IPL Analytics Dashboard", layout="wide")
 
 # -------------------------------
-# BASE PATH (CRITICAL FIX)
+# BASE PATH
 # -------------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,20 +16,28 @@ MODEL_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'ipl_model.pkl')
 ENCODER_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'encoders.pkl')
 
 # -------------------------------
-# LOAD DATA
+# LOAD DATA (CACHED 🚀)
 # -------------------------------
-df = pd.read_csv(DATA_PATH, low_memory=False)
+@st.cache_data
+def load_data():
+    return pd.read_parquet(DATA_PATH)
+
+df = load_data()
 
 # -------------------------------
 # LOAD MODEL + ENCODERS
 # -------------------------------
-try:
-    model = joblib.load(MODEL_PATH)
-    encoders = joblib.load(ENCODER_PATH)
-    model_loaded = True
-except Exception as e:
-    st.error(f"Error loading model: {e}")
-    model_loaded = False
+@st.cache_resource
+def load_model():
+    try:
+        model = joblib.load(MODEL_PATH)
+        encoders = joblib.load(ENCODER_PATH)
+        return model, encoders, True
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        return None, None, False
+
+model, encoders, model_loaded = load_model()
 
 # -------------------------------
 # TITLE
@@ -68,7 +76,7 @@ if page == "Overview":
     top_teams = winners['match_won_by'].value_counts().head(10)
 
     fig, ax = plt.subplots()
-    top_teams.plot(kind='bar', ax=ax, color='skyblue')
+    top_teams.plot(kind='bar', ax=ax)
     ax.set_title("Top Teams by Wins")
     ax.set_ylabel("Wins")
 
@@ -80,7 +88,7 @@ if page == "Overview":
 elif page == "Team Analysis":
     st.header("🏏 Team Analysis")
 
-    teams = df['batting_team'].unique()
+    teams = df['batting_team'].dropna().unique()
     selected_team = st.selectbox("Select Team", teams)
 
     team_matches = df[
@@ -104,6 +112,9 @@ elif page == "Team Analysis":
 
     st.pyplot(fig)
 
+# -------------------------------
+# PLAYER ANALYSIS
+# -------------------------------
 elif page == "Player Analysis":
     st.header("🏏 Player Analysis")
 
@@ -125,14 +136,9 @@ elif page == "Player Analysis":
     elif is_bowler:
         st.success("Role: Bowler")
 
-    # -------------------------------
-    # FILTER OPTION
-    # -------------------------------
     analysis_type = st.radio("Select Analysis Type", ["Batting", "Bowling", "Both"])
 
-    # -------------------------------
-    # BATTING
-    # -------------------------------
+    # -------- BATTING --------
     if analysis_type in ["Batting", "Both"] and is_batter:
 
         st.subheader("🏏 Batting Stats")
@@ -147,17 +153,15 @@ elif page == "Player Analysis":
         highest_score = player_df.groupby('match_id')['runs_batter'].sum().max()
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Runs", total_runs)
+        col1.metric("Total Runs", int(total_runs))
         col2.metric("Strike Rate", round(strike_rate, 2))
-        col3.metric("Highest Score", highest_score)
+        col3.metric("Highest Score", int(highest_score) if pd.notna(highest_score) else 0)
 
         col4, col5 = st.columns(2)
         col4.metric("Fours", fours)
         col5.metric("Sixes", sixes)
 
-        # -------------------------------
-        # OVER-WISE STRIKE RATE (NEW 🔥)
-        # -------------------------------
+        # Over-wise
         st.subheader("📈 Over-wise Strike Rate")
 
         over_stats = player_df.groupby('over').agg({
@@ -168,7 +172,7 @@ elif page == "Player Analysis":
         over_stats['strike_rate'] = (over_stats['runs_batter'] / over_stats['ball']) * 100
 
         fig, ax = plt.subplots()
-        ax.plot(over_stats['over'], over_stats['strike_rate'], marker='o', color='red')
+        ax.plot(over_stats['over'], over_stats['strike_rate'], marker='o')
 
         ax.set_xlabel("Over")
         ax.set_ylabel("Strike Rate")
@@ -176,9 +180,7 @@ elif page == "Player Analysis":
 
         st.pyplot(fig)
 
-    # -------------------------------
-    # BOWLING
-    # -------------------------------
+    # -------- BOWLING --------
     if analysis_type in ["Bowling", "Both"] and is_bowler:
 
         st.subheader("🎯 Bowling Stats")
@@ -196,9 +198,7 @@ elif page == "Player Analysis":
         col2.metric("Economy", round(economy, 2))
         col3.metric("Strike Rate", round(strike_rate, 2))
 
-    # -------------------------------
-    # 🆚 BATTER VS BOWLER (FIXED POSITION)
-    # -------------------------------
+    # -------- VS ANALYSIS --------
     st.subheader("🆚 Batter vs Bowler Analysis")
 
     batter = st.selectbox("Select Batter", sorted(df['batter'].dropna().unique()))
@@ -216,7 +216,7 @@ elif page == "Player Analysis":
         economy = (runs / (balls / 6)) if balls > 0 else 0
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Runs", runs)
+        col1.metric("Runs", int(runs))
         col2.metric("Balls", balls)
         col3.metric("Outs", int(outs))
 
@@ -226,14 +226,15 @@ elif page == "Player Analysis":
 
     else:
         st.warning("No data available for this matchup")
+
 # -------------------------------
 # MATCH PREDICTION
 # -------------------------------
 elif page == "Match Prediction":
     st.header("🔮 Match Prediction")
 
-    teams = df['batting_team'].unique()
-    venues = df['venue'].unique()
+    teams = df['batting_team'].dropna().unique()
+    venues = df['venue'].dropna().unique()
 
     team1 = st.selectbox("Team 1", teams)
     team2 = st.selectbox("Team 2", teams)
@@ -244,9 +245,8 @@ elif page == "Match Prediction":
     if st.button("Predict Winner"):
 
         if not model_loaded:
-            st.error("Model or encoders not found. Train model first.")
+            st.error("Model or encoders not found.")
         else:
-            # Create input
             input_data = pd.DataFrame({
                 'batting_team': [team1],
                 'bowling_team': [team2],
@@ -258,32 +258,16 @@ elif page == "Match Prediction":
                 'toss_win_match_win': [1]
             })
 
-            # -------------------------------
-            # APPLY ENCODING (CRITICAL)
-            # -------------------------------
             for col in encoders:
                 input_data[col] = encoders[col].transform(input_data[col])
 
-            # -------------------------------
-            # PREDICT
-            # -------------------------------
             prediction = model.predict(input_data)[0]
             proba = model.predict_proba(input_data)
 
-            # -------------------------------
-            # RESULT
-            # -------------------------------
-            if prediction == 1:
-                winner = team1
-            else:
-                winner = team2
+            winner = team1 if prediction == 1 else team2
 
             st.success(f"🏆 Predicted Winner: {winner}")
 
-            # -------------------------------
-            # PROBABILITY
-            # -------------------------------
             st.write("### Win Probability")
-
             st.write(f"{team1}: {round(proba[0][1]*100, 2)}%")
             st.write(f"{team2}: {round(proba[0][0]*100, 2)}%")
